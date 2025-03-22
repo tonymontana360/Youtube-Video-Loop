@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Looper</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #cc0000;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin-bottom: 20px;
+            display: flex;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #cc0000;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 10px;
+        }
+        button:hover {
+            background-color: #990000;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #videoContainer {
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+            margin-top: 20px;
+            background-color: #000;
+        }
+        #player {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        .status {
+            text-align: center;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        #loopStatus {
+            color: #cc0000;
+        }
+        .instructions {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+        #statusMessage {
+            color: #cc0000;
+            text-align: center;
+            margin: 10px 0;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Video Looper</h1>
+        
+        <div class="input-group">
+            <input type="text" id="videoUrl" placeholder="Enter YouTube video URL or ID (e.g., dQw4w9WgXcQ)">
+            <button id="loadButton">Load Video</button>
+        </div>
+        
+        <div id="statusMessage"></div>
+        
+        <div id="videoContainer">
+            <div id="player"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="playButton">Play</button>
+            <button id="pauseButton">Pause</button>
+            <button id="toggleLoopButton">Enable Loop</button>
+        </div>
+        
+        <div class="status">
+            Loop Status: <span id="loopStatus">Disabled</span>
+        </div>
+        
+        <div class="instructions">
+            <h3>How to use:</h3>
+            <ol>
+                <li>Paste a YouTube video URL (https://www.youtube.com/watch?v=dQw4w9WgXcQ) or just the video ID (dQw4w9WgXcQ) in the input field</li>
+                <li>Click "Load Video" to load the video</li>
+                <li>Click "Enable Loop" to start looping the video</li>
+                <li>Click "Pause" to stop the video (this will also stop looping)</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        // Variables
+        let player = null;
+        let looping = false;
+        let playerReady = false;
+        
+        // DOM Elements
+        const loadButton = document.getElementById('loadButton');
+        const playButton = document.getElementById('playButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const toggleLoopButton = document.getElementById('toggleLoopButton');
+        const videoUrlInput = document.getElementById('videoUrl');
+        const loopStatusEl = document.getElementById('loopStatus');
+        const statusMessageEl = document.getElementById('statusMessage');
+        
+        // Set initial button states
+        playButton.disabled = true;
+        pauseButton.disabled = true;
+        toggleLoopButton.disabled = true;
+        
+        // Show status message
+        function showStatus(message, isError = false) {
+            statusMessageEl.textContent = message;
+            statusMessageEl.style.color = isError ? '#cc0000' : '#009900';
+            
+            // Clear message after 5 seconds
+            setTimeout(() => {
+                statusMessageEl.textContent = '';
+            }, 5000);
+        }
+        
+        // Extract video ID from URL or use direct ID
+        function getVideoId(url) {
+            // Handle empty input
+            if (!url) return null;
+            
+            // Handle YouTube.com URLs
+            if (url.includes('youtube.com/watch')) {
+                try {
+                    const urlObj = new URL(url);
+                    return urlObj.searchParams.get('v');
+                } catch (e) {
+                    return null;
+                }
+            } 
+            // Handle youtu.be URLs
+            else if (url.includes('youtu.be/')) {
+                try {
+                    const parts = url.split('youtu.be/');
+                    return parts[1].split('?')[0];
+                } catch (e) {
+                    return null;
+                }
+            } 
+            // Handle direct video IDs (assume it's an ID if it's 11 characters)
+            else if (url.match(/^[a-zA-Z0-9_-]{11}$/)) {
+                return url;
+            }
+            
+            return null;
+        }
+        
+        // Update loop status display
+        function updateLoopStatus() {
+            loopStatusEl.textContent = looping ? 'Enabled' : 'Disabled';
+        }
+        
+        // Update button states based on player state
+        function updateButtons() {
+            const playerState = player ? player.getPlayerState() : -1;
+            
+            playButton.disabled = !playerReady || playerState === YT.PlayerState.PLAYING;
+            pauseButton.disabled = !playerReady || playerState !== YT.PlayerState.PLAYING;
+            toggleLoopButton.disabled = !playerReady;
+        }
+        
+        // Initialize YouTube player
+        window.onYouTubeIframeAPIReady = function() {
+            console.log("YouTube API Ready");
+            
+            player = new YT.Player('player', {
+                height: '100%',
+                width: '100%',
+                videoId: 'dQw4w9WgXcQ', // Default video ID to ensure player loads properly
+                playerVars: {
+                    'autoplay': 0,
+                    'controls': 1,
+                    'rel': 0,
+                    'fs': 1
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
+                }
+            });
+        }
+        
+        // Player ready handler
+        function onPlayerReady(event) {
+            console.log("Player Ready");
+            playerReady = true;
+            
+            // Enable buttons once player is ready
+            toggleLoopButton.disabled = false;
+            playButton.disabled = false;
+            
+            // Mute the default video initially
+            player.mute();
+            
+            showStatus("YouTube player is ready. You can load a video now.");
+            
+            // Explicitly pause the default video to avoid autoplay issues
+            player.pauseVideo();
+        }
+        
+        // Player state change handler
+        function onPlayerStateChange(event) {
+            console.log("Player State Change:", event.data);
+            
+            // If video ended and looping is enabled, restart it
+            if (event.data === YT.PlayerState.ENDED && looping) {
+                player.seekTo(0);
+                player.playVideo();
+            }
+            
+            // Update button states
+            updateButtons();
+        }
+        
+        // Player error handler
+        function onPlayerError(event) {
+            console.error("Player Error:", event.data);
+            const errorMessages = {
+                2: "Invalid video ID",
+                5: "HTML5 player error",
+                100: "Video not found or removed",
+                101: "Video owner doesn't allow embedding",
+                150: "Video owner doesn't allow embedding"
+            };
+            
+            const errorMessage = errorMessages[event.data] || "Unknown error occurred";
+            showStatus(`Error: ${errorMessage}`, true);
+        }
+        
+        // Load video button handler
+        loadButton.addEventListener('click', function() {
+            const url = videoUrlInput.value.trim();
+            if (!url) {
+                showStatus("Please enter a YouTube URL or video ID", true);
+                return;
+            }
+            
+            const videoId = getVideoId(url);
+            if (!videoId) {
+                showStatus("Invalid YouTube URL or ID. Please check and try again.", true);
+                return;
+            }
+            
+            // Check if player is ready, with a more helpful message and retry option
+            if (!playerReady) {
+                showStatus("Still initializing the YouTube player. This usually takes just a moment...", true);
+                
+                // Try again in 2 seconds
+                setTimeout(() => {
+                    if (playerReady) {
+                        loadButton.click();
+                    } else {
+                        showStatus("YouTube player initialization issue. Please refresh the page.", true);
+                    }
+                }, 2000);
+                
+                return;
+            }
+            
+            // Load the video
+            console.log("Loading video ID:", videoId);
+            player.loadVideoById({
+                videoId: videoId,
+                startSeconds: 0,
+                suggestedQuality: 'default'
+            });
+            
+            // Unmute in case the initial video was muted
+            player.unMute();
+            
+            // Reset looping status
+            looping = false;
+            updateLoopStatus();
+            
+            // Update button states
+            toggleLoopButton.disabled = false;
+            playButton.disabled = false;
+            pauseButton.disabled = true;
+            
+            showStatus("Video loaded successfully!");
+        });
+        
+        // Play button handler
+        playButton.addEventListener('click', function() {
+            if (playerReady && player) {
+                player.playVideo();
+                updateButtons();
+            }
+        });
+        
+        // Pause button handler
+        pauseButton.addEventListener('click', function() {
+            if (playerReady && player) {
+                player.pauseVideo();
+                looping = false;
+                updateLoopStatus();
+                updateButtons();
+            }
+        });
+        
+        // Toggle loop button handler
+        toggleLoopButton.addEventListener('click', function() {
+            if (!playerReady) {
+                showStatus("YouTube player is not ready yet.", true);
+                return;
+            }
+            
+            looping = !looping;
+            updateLoopStatus();
+            
+            if (looping && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                player.playVideo();
+                updateButtons();
+            }
+            
+            showStatus(looping ? "Looping enabled" : "Looping disabled");
+        });
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("DOM Loaded");
+            showStatus("Initializing YouTube player...");
+            
+            // Handle Enter key in the input field
+            videoUrlInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    loadButton.click();
+                }
+            });
+        });
+        
+        // Provide a fallback if the YouTube API fails to load
+        window.setTimeout(function() {
+            if (!playerReady && !player) {
+                showStatus("YouTube API failed to load. Please refresh the page and try again.", true);
+            }
+        }, 10000);
+    </script>
+</body>
+</html>
